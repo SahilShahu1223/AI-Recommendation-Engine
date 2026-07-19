@@ -1,0 +1,26 @@
+@import './fonts.css';
+@import './tailwind.css';
+@import './theme.css';
+
+:root,
+[data-theme="dark"] {
+  --bg: #080818;
+  --surface: 255 255 255; /* used as rgb() base for bg-white/x, text-white/x, border-white/x replacements */
+  --fg: #ffffff;
+  --border: #ffffff;
+  --surface-solid-1: #0e0e24; /* modal bg */
+  --surface-solid-2: #12122a; /* dropdown bg */
+  --surface-solid-3: #0d0d20; /* select option bg */
+  color-scheme: dark;
+}
+
+[data-theme="light"] {
+  --bg: #f5f5fa;
+  --surface: 15 15 30;
+  --fg: #12122a;
+  --border: #12122a;
+  --surface-solid-1: #ffffff;
+  --surface-solid-2: #ffffff;
+  --surface-solid-3: #f0f0f5;
+  color-scheme: light;
+}
