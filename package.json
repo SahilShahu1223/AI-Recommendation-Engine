@@ -24,9 +24,12 @@
     "morgan": "^1.10.0",
     "pg": "^8.13.1",
     "stripe": "^22.3.2",
-    "uuid": "^9.0.1"
+    "uuid": "^11.1.0"
+  },
+  "devDependencies": {
+    "typescript": "5.6.3"
   },
   "engines": {
-    "node": ">=18"
+    "node": "20.x"
   }
 }
