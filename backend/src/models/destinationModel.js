@@ -18,7 +18,7 @@ async function search({ q, country, type, category, budgetTier, kidFriendly }) {
   const params = {};
 
   if (q) {
-    sql += ' AND (name LIKE :q OR country LIKE :q OR description LIKE :q)';
+    sql += ' AND (name ILIKE :q OR country ILIKE :q OR description ILIKE :q)';
     params.q = `%${q}%`;
   }
   if (country) {
@@ -30,7 +30,7 @@ async function search({ q, country, type, category, budgetTier, kidFriendly }) {
     params.type = type;
   }
   if (category) {
-    sql += ' AND FIND_IN_SET(:category, category)';
+    sql += ' AND :category = ANY(string_to_array(category, \',\'))';
     params.category = category;
   }
   if (budgetTier) {
@@ -39,7 +39,7 @@ async function search({ q, country, type, category, budgetTier, kidFriendly }) {
   }
   if (kidFriendly !== undefined) {
     sql += ' AND kid_friendly = :kidFriendly';
-    params.kidFriendly = kidFriendly ? 1 : 0;
+    params.kidFriendly = !!kidFriendly;
   }
 
   sql += ' ORDER BY popularity_score DESC LIMIT 100';
@@ -51,7 +51,7 @@ async function getCategories() {
   const [rows] = await pool.query('SELECT DISTINCT category FROM destinations');
   const set = new Set();
   rows.forEach((r) => {
-    if (r.category) r.category.split(',').forEach((c) => set.add(c));
+    if (r.category) r.category.split(',').forEach((c) => set.add(c.trim()));
   });
   return Array.from(set);
 }
@@ -75,7 +75,7 @@ async function listInternational({ limit = 20 } = {}) {
 async function updateRatingAggregate(destinationId) {
   await pool.query(
     `UPDATE destinations d
-     SET avg_rating = (SELECT AVG(rating) FROM reviews WHERE destination_id = d.id),
+     SET avg_rating = (SELECT COALESCE(AVG(rating), 0) FROM reviews WHERE destination_id = d.id),
          rating_count = (SELECT COUNT(*) FROM reviews WHERE destination_id = d.id)
      WHERE d.id = :destinationId`,
     { destinationId }

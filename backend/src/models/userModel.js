@@ -4,13 +4,13 @@ async function createUser({
   firstName, lastName, email, passwordHash, dateOfBirth,
   gender, country, preferredTravelStyle, credits,
 }) {
-  const [result] = await pool.query(
+  const [, meta] = await pool.query(
     `INSERT INTO users
       (first_name, last_name, email, password_hash, date_of_birth, gender, country, preferred_travel_style, credits)
      VALUES (:firstName, :lastName, :email, :passwordHash, :dateOfBirth, :gender, :country, :preferredTravelStyle, :credits)`,
     { firstName, lastName, email, passwordHash, dateOfBirth, gender, country, preferredTravelStyle, credits }
   );
-  return result.insertId;
+  return meta.insertId;
 }
 
 async function findByEmail(email) {

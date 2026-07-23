@@ -21,7 +21,7 @@ async function search({ category, q }) {
     params.category = category;
   }
   if (q) {
-    sql += ' AND (title LIKE :q OR description LIKE :q OR tags LIKE :q)';
+    sql += ' AND (title ILIKE :q OR description ILIKE :q OR tags ILIKE :q)';
     params.q = `%${q}%`;
   }
   sql += ' ORDER BY popularity_score DESC LIMIT 100';

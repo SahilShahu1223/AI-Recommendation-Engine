@@ -8,8 +8,8 @@ const PORT = process.env.PORT || 5000;
   try {
     await testConnection();
   } catch (err) {
-    console.error('[db] Failed to connect to MySQL:', err.message);
-    console.error('Make sure MySQL is running and .env DB_* values are correct, and that you have imported database/schema.sql');
+    console.error('[db] Failed to connect to PostgreSQL:', err.message);
+    console.error('Make sure DATABASE_URL is set and database/schema.sql has been applied.');
     process.exit(1);
   }
 

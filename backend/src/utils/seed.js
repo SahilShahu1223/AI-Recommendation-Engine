@@ -12,8 +12,8 @@ const { pool } = require('../config/db');
 async function run() {
   const hash = await bcrypt.hash('Passw0rd!', 10);
   await pool.query(
-    "UPDATE users SET password_hash = ? WHERE email = 'demo@smartrecommend.ai'",
-    [hash]
+    "UPDATE users SET password_hash = :hash WHERE email = 'demo@smartrecommend.ai'",
+    { hash }
   );
   console.log('Demo user password hash updated. Login with demo@smartrecommend.ai / Passw0rd!');
   process.exit(0);

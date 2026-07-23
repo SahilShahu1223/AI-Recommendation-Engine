@@ -1,12 +1,12 @@
 const { pool } = require('../config/db');
 
 async function addTravelHistory({ userId, destinationId, destinationName, visitedOn, notes }) {
-  const [result] = await pool.query(
+  const [, meta] = await pool.query(
     `INSERT INTO travel_history (user_id, destination_id, destination_name, visited_on, notes)
      VALUES (:userId, :destinationId, :destinationName, :visitedOn, :notes)`,
     { userId, destinationId, destinationName, visitedOn, notes }
   );
-  return result.insertId;
+  return meta.insertId;
 }
 
 async function listTravelHistory(userId) {
@@ -18,7 +18,7 @@ async function listTravelHistory(userId) {
 
 async function addSearchHistory({ userId, query, filters }) {
   await pool.query(
-    'INSERT INTO search_history (user_id, query, filters) VALUES (:userId, :query, :filters)',
+    'INSERT INTO search_history (user_id, query, filters) VALUES (:userId, :query, :filters::jsonb)',
     { userId, query, filters: filters ? JSON.stringify(filters) : null }
   );
 }

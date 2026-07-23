@@ -1,12 +1,12 @@
 const { pool } = require('../config/db');
 
 async function createSession({ userId, refreshToken, userAgent, ipAddress, expiresAt }) {
-  const [result] = await pool.query(
+  const [, meta] = await pool.query(
     `INSERT INTO sessions (user_id, refresh_token, user_agent, ip_address, expires_at)
      VALUES (:userId, :refreshToken, :userAgent, :ipAddress, :expiresAt)`,
     { userId, refreshToken, userAgent, ipAddress, expiresAt }
   );
-  return result.insertId;
+  return meta.insertId;
 }
 
 async function findActiveSession(refreshToken) {

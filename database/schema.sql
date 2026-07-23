@@ -1,296 +1,301 @@
 -- =====================================================================
 -- Smart Recommend AI — Database Schema
--- MySQL 8.0+
+-- PostgreSQL 14+ (Neon / Supabase compatible)
 -- =====================================================================
 
-CREATE DATABASE IF NOT EXISTS smart_recommend_ai
-  CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+-- Drop tables in dependency order
+DROP TABLE IF EXISTS recommendation_results CASCADE;
+DROP TABLE IF EXISTS saved_recommendations CASCADE;
+DROP TABLE IF EXISTS wishlist CASCADE;
+DROP TABLE IF EXISTS reviews CASCADE;
+DROP TABLE IF EXISTS credit_transactions CASCADE;
+DROP TABLE IF EXISTS search_history CASCADE;
+DROP TABLE IF EXISTS travel_history CASCADE;
+DROP TABLE IF EXISTS recommendation_requests CASCADE;
+DROP TABLE IF EXISTS kids_activities CASCADE;
+DROP TABLE IF EXISTS kids_catalog_items CASCADE;
+DROP TABLE IF EXISTS catalog_items CASCADE;
+DROP TABLE IF EXISTS destinations CASCADE;
+DROP TABLE IF EXISTS sessions CASCADE;
+DROP TABLE IF EXISTS users CASCADE;
 
-USE smart_recommend_ai;
-
-SET FOREIGN_KEY_CHECKS = 0;
+DROP FUNCTION IF EXISTS update_updated_at_column() CASCADE;
 
 -- ---------------------------------------------------------------------
 -- USERS
 -- ---------------------------------------------------------------------
-DROP TABLE IF EXISTS users;
 CREATE TABLE users (
-  id                  BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  first_name          VARCHAR(100)      NOT NULL,
-  last_name           VARCHAR(100)      NOT NULL,
-  email               VARCHAR(255)      NOT NULL UNIQUE,
-  password_hash       VARCHAR(255)      NOT NULL,
-  date_of_birth       DATE              NOT NULL,
-  gender              ENUM('male','female','other','prefer_not_to_say') DEFAULT 'prefer_not_to_say',
-  country             VARCHAR(100)      NOT NULL,
-  preferred_travel_style ENUM('budget','comfort','luxury','adventure','family','solo','backpacker') DEFAULT 'comfort',
-  credits             INT UNSIGNED      NOT NULL DEFAULT 5,
-  plan                ENUM('free','pro') NOT NULL DEFAULT 'free',
-  cancel_at_period_end BOOLEAN          NOT NULL DEFAULT FALSE,  -- TRUE once user cancels; plan stays 'pro' until current_period_end
-  current_period_end  DATE              DEFAULT NULL,           -- when the current paid period (demo or real) ends
-  avatar_url          VARCHAR(500)      DEFAULT NULL,
-  bio                 VARCHAR(500)      DEFAULT NULL,
-  is_active           BOOLEAN           NOT NULL DEFAULT TRUE,
-  created_at          TIMESTAMP         DEFAULT CURRENT_TIMESTAMP,
-  updated_at          TIMESTAMP         DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  INDEX idx_users_email (email),
-  INDEX idx_users_country (country)
-) ENGINE=InnoDB;
+  id                     BIGSERIAL PRIMARY KEY,
+  first_name             VARCHAR(100)      NOT NULL,
+  last_name              VARCHAR(100)      NOT NULL,
+  email                  VARCHAR(255)      NOT NULL UNIQUE,
+  password_hash          VARCHAR(255)      NOT NULL,
+  date_of_birth          DATE              NOT NULL,
+  gender                 VARCHAR(32)       NOT NULL DEFAULT 'prefer_not_to_say'
+    CHECK (gender IN ('male', 'female', 'other', 'prefer_not_to_say')),
+  country                VARCHAR(100)      NOT NULL,
+  preferred_travel_style VARCHAR(32)       NOT NULL DEFAULT 'comfort'
+    CHECK (preferred_travel_style IN ('budget', 'comfort', 'luxury', 'adventure', 'family', 'solo', 'backpacker')),
+  credits                INTEGER           NOT NULL DEFAULT 5 CHECK (credits >= 0),
+  plan                   VARCHAR(16)       NOT NULL DEFAULT 'free'
+    CHECK (plan IN ('free', 'pro')),
+  cancel_at_period_end   BOOLEAN           NOT NULL DEFAULT FALSE,
+  current_period_end     DATE              DEFAULT NULL,
+  avatar_url             VARCHAR(500)      DEFAULT NULL,
+  bio                    VARCHAR(500)      DEFAULT NULL,
+  is_active              BOOLEAN           NOT NULL DEFAULT TRUE,
+  created_at             TIMESTAMPTZ       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at             TIMESTAMPTZ       NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_users_email ON users (email);
+CREATE INDEX idx_users_country ON users (country);
 
 -- ---------------------------------------------------------------------
--- REFRESH TOKENS / SESSIONS (for JWT session management + logout)
+-- REFRESH TOKENS / SESSIONS
 -- ---------------------------------------------------------------------
-DROP TABLE IF EXISTS sessions;
 CREATE TABLE sessions (
-  id            BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  user_id       BIGINT UNSIGNED NOT NULL,
-  refresh_token VARCHAR(500)    NOT NULL,
-  user_agent    VARCHAR(255)    DEFAULT NULL,
-  ip_address    VARCHAR(64)     DEFAULT NULL,
-  expires_at    TIMESTAMP       NOT NULL,
-  revoked       BOOLEAN         NOT NULL DEFAULT FALSE,
-  created_at    TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-  INDEX idx_sessions_user (user_id),
-  INDEX idx_sessions_token (refresh_token(191))
-) ENGINE=InnoDB;
+  id             BIGSERIAL PRIMARY KEY,
+  user_id        BIGINT       NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  refresh_token  VARCHAR(500) NOT NULL,
+  user_agent     VARCHAR(255) DEFAULT NULL,
+  ip_address     VARCHAR(64)  DEFAULT NULL,
+  expires_at     TIMESTAMPTZ  NOT NULL,
+  revoked        BOOLEAN      NOT NULL DEFAULT FALSE,
+  created_at     TIMESTAMPTZ  NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_sessions_user ON sessions (user_id);
+CREATE INDEX idx_sessions_token ON sessions (refresh_token);
 
 -- ---------------------------------------------------------------------
--- DESTINATIONS (master catalog used by the recommendation engine)
+-- DESTINATIONS
 -- ---------------------------------------------------------------------
-DROP TABLE IF EXISTS destinations;
 CREATE TABLE destinations (
-  id                BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  name              VARCHAR(150)  NOT NULL,
-  country           VARCHAR(100)  NOT NULL,
-  region            VARCHAR(100)  DEFAULT NULL,          -- e.g. 'South Asia', 'Europe'
-  type              ENUM('domestic','international') NOT NULL,
-  category           SET('beach','mountain','heritage','adventure','wildlife','city','wellness','romantic','family','budget','luxury') DEFAULT NULL,
-  best_season       SET('winter','summer','monsoon','spring','autumn','all_year') DEFAULT 'all_year',
+  id                   BIGSERIAL PRIMARY KEY,
+  name                 VARCHAR(150)  NOT NULL,
+  country              VARCHAR(100)  NOT NULL,
+  region               VARCHAR(100)  DEFAULT NULL,
+  type                 VARCHAR(32)   NOT NULL CHECK (type IN ('domestic', 'international')),
+  category             TEXT          DEFAULT NULL,
+  best_season          TEXT          DEFAULT 'all_year',
   avg_cost_per_day_usd DECIMAL(10,2) DEFAULT NULL,
-  budget_tier       ENUM('low','medium','high','luxury') DEFAULT 'medium',
-  min_age_recommended INT UNSIGNED DEFAULT 0,
-  kid_friendly      BOOLEAN       NOT NULL DEFAULT FALSE,
-  description       TEXT,
-  image_url         VARCHAR(500)  DEFAULT NULL,
-  popularity_score  DECIMAL(4,2)  DEFAULT 0,              -- 0-10, trending weight
-  avg_rating        DECIMAL(3,2)  DEFAULT 0,
-  rating_count      INT UNSIGNED  DEFAULT 0,
-  created_at        TIMESTAMP     DEFAULT CURRENT_TIMESTAMP,
-  INDEX idx_dest_country (country),
-  INDEX idx_dest_type (type),
-  INDEX idx_dest_kid (kid_friendly),
-  FULLTEXT INDEX ft_dest_search (name, description)
-) ENGINE=InnoDB;
+  budget_tier          VARCHAR(16)   DEFAULT 'medium'
+    CHECK (budget_tier IN ('low', 'medium', 'high', 'luxury')),
+  min_age_recommended  INTEGER       DEFAULT 0 CHECK (min_age_recommended >= 0),
+  kid_friendly         BOOLEAN       NOT NULL DEFAULT FALSE,
+  description          TEXT,
+  image_url            VARCHAR(500)  DEFAULT NULL,
+  popularity_score     DECIMAL(4,2)  DEFAULT 0,
+  avg_rating           DECIMAL(3,2)  DEFAULT 0,
+  rating_count         INTEGER       DEFAULT 0 CHECK (rating_count >= 0),
+  created_at           TIMESTAMPTZ   NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_dest_country ON destinations (country);
+CREATE INDEX idx_dest_type ON destinations (type);
+CREATE INDEX idx_dest_kid ON destinations (kid_friendly);
 
 -- ---------------------------------------------------------------------
--- KIDS ACTIVITIES (linked to a destination, for the Kids section)
+-- KIDS ACTIVITIES
 -- ---------------------------------------------------------------------
-DROP TABLE IF EXISTS kids_activities;
 CREATE TABLE kids_activities (
-  id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  destination_id  BIGINT UNSIGNED NOT NULL,
+  id              BIGSERIAL PRIMARY KEY,
+  destination_id  BIGINT       NOT NULL REFERENCES destinations(id) ON DELETE CASCADE,
   title           VARCHAR(150) NOT NULL,
-  activity_type   ENUM('theme_park','educational','wildlife','beach','adventure_mild','museum','water_park') NOT NULL,
-  min_age         INT UNSIGNED DEFAULT 0,
-  max_age         INT UNSIGNED DEFAULT 17,
+  activity_type   VARCHAR(32)  NOT NULL
+    CHECK (activity_type IN ('theme_park', 'educational', 'wildlife', 'beach', 'adventure_mild', 'museum', 'water_park')),
+  min_age         INTEGER      DEFAULT 0 CHECK (min_age >= 0),
+  max_age         INTEGER      DEFAULT 17 CHECK (max_age >= 0),
   safety_notes    VARCHAR(500) DEFAULT NULL,
   description     TEXT,
   image_url       VARCHAR(500) DEFAULT NULL,
-  created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (destination_id) REFERENCES destinations(id) ON DELETE CASCADE,
-  INDEX idx_kids_dest (destination_id),
-  INDEX idx_kids_age (min_age, max_age)
-) ENGINE=InnoDB;
+  created_at      TIMESTAMPTZ  NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_kids_dest ON kids_activities (destination_id);
+CREATE INDEX idx_kids_age ON kids_activities (min_age, max_age);
 
 -- ---------------------------------------------------------------------
--- TRAVEL HISTORY (places the user has already been / logged)
+-- TRAVEL HISTORY
 -- ---------------------------------------------------------------------
-DROP TABLE IF EXISTS travel_history;
 CREATE TABLE travel_history (
-  id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  user_id         BIGINT UNSIGNED NOT NULL,
-  destination_id  BIGINT UNSIGNED DEFAULT NULL,
+  id               BIGSERIAL PRIMARY KEY,
+  user_id          BIGINT       NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  destination_id   BIGINT       REFERENCES destinations(id) ON DELETE SET NULL,
   destination_name VARCHAR(150) NOT NULL,
-  visited_on      DATE DEFAULT NULL,
-  notes           VARCHAR(500) DEFAULT NULL,
-  created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-  FOREIGN KEY (destination_id) REFERENCES destinations(id) ON DELETE SET NULL,
-  INDEX idx_hist_user (user_id)
-) ENGINE=InnoDB;
+  visited_on       DATE         DEFAULT NULL,
+  notes            VARCHAR(500) DEFAULT NULL,
+  created_at       TIMESTAMPTZ  NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_hist_user ON travel_history (user_id);
 
 -- ---------------------------------------------------------------------
--- RECOMMENDATION REQUESTS (one row per "generate recommendations" call)
+-- RECOMMENDATION REQUESTS
 -- ---------------------------------------------------------------------
-DROP TABLE IF EXISTS recommendation_requests;
 CREATE TABLE recommendation_requests (
-  id                BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  user_id           BIGINT UNSIGNED NOT NULL,
-  interests         VARCHAR(500) DEFAULT NULL,
-  purpose           VARCHAR(255) DEFAULT NULL,
-  budget_usd        DECIMAL(10,2) DEFAULT NULL,
-  location_preference VARCHAR(150) DEFAULT NULL,  -- NULL/blank = "no preference"
-  travel_style      VARCHAR(50) DEFAULT NULL,
-  season            VARCHAR(50) DEFAULT NULL,
-  result_count      INT UNSIGNED DEFAULT 0,
-  created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-  INDEX idx_reqs_user (user_id)
-) ENGINE=InnoDB;
+  id                  BIGSERIAL PRIMARY KEY,
+  user_id             BIGINT       NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  interests           VARCHAR(500) DEFAULT NULL,
+  purpose             VARCHAR(255) DEFAULT NULL,
+  budget_usd          DECIMAL(10,2) DEFAULT NULL,
+  location_preference VARCHAR(150) DEFAULT NULL,
+  travel_style        VARCHAR(50)  DEFAULT NULL,
+  season              VARCHAR(50)  DEFAULT NULL,
+  result_count        INTEGER      DEFAULT 0 CHECK (result_count >= 0),
+  created_at          TIMESTAMPTZ  NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_reqs_user ON recommendation_requests (user_id);
 
 -- ---------------------------------------------------------------------
--- RECOMMENDATION RESULTS (the destinations returned for a request)
+-- RECOMMENDATION RESULTS
 -- ---------------------------------------------------------------------
-DROP TABLE IF EXISTS recommendation_results;
 CREATE TABLE recommendation_results (
-  id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  request_id      BIGINT UNSIGNED NOT NULL,
-  destination_id  BIGINT UNSIGNED NOT NULL,
-  score           DECIMAL(6,3) NOT NULL,
-  reason          VARCHAR(500) DEFAULT NULL,
-  rank_position   INT UNSIGNED DEFAULT 0,
-  FOREIGN KEY (request_id) REFERENCES recommendation_requests(id) ON DELETE CASCADE,
-  FOREIGN KEY (destination_id) REFERENCES destinations(id) ON DELETE CASCADE,
-  INDEX idx_results_req (request_id)
-) ENGINE=InnoDB;
+  id             BIGSERIAL PRIMARY KEY,
+  request_id     BIGINT       NOT NULL REFERENCES recommendation_requests(id) ON DELETE CASCADE,
+  destination_id BIGINT       NOT NULL REFERENCES destinations(id) ON DELETE CASCADE,
+  score          DECIMAL(6,3) NOT NULL,
+  reason         VARCHAR(500) DEFAULT NULL,
+  rank_position  INTEGER      DEFAULT 0 CHECK (rank_position >= 0)
+);
+
+CREATE INDEX idx_results_req ON recommendation_results (request_id);
 
 -- ---------------------------------------------------------------------
 -- WISHLIST
 -- ---------------------------------------------------------------------
-DROP TABLE IF EXISTS wishlist;
 CREATE TABLE wishlist (
-  id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  user_id         BIGINT UNSIGNED NOT NULL,
-  destination_id  BIGINT UNSIGNED NOT NULL,
-  added_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-  FOREIGN KEY (destination_id) REFERENCES destinations(id) ON DELETE CASCADE,
-  UNIQUE KEY uq_wishlist (user_id, destination_id)
-) ENGINE=InnoDB;
+  id             BIGSERIAL PRIMARY KEY,
+  user_id        BIGINT      NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  destination_id BIGINT      NOT NULL REFERENCES destinations(id) ON DELETE CASCADE,
+  added_at       TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (user_id, destination_id)
+);
 
 -- ---------------------------------------------------------------------
 -- SAVED RECOMMENDATIONS
 -- ---------------------------------------------------------------------
-DROP TABLE IF EXISTS saved_recommendations;
 CREATE TABLE saved_recommendations (
-  id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  user_id         BIGINT UNSIGNED NOT NULL,
-  destination_id  BIGINT UNSIGNED NOT NULL,
-  request_id      BIGINT UNSIGNED DEFAULT NULL,
-  saved_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-  FOREIGN KEY (destination_id) REFERENCES destinations(id) ON DELETE CASCADE,
-  FOREIGN KEY (request_id) REFERENCES recommendation_requests(id) ON DELETE SET NULL,
-  UNIQUE KEY uq_saved (user_id, destination_id)
-) ENGINE=InnoDB;
+  id             BIGSERIAL PRIMARY KEY,
+  user_id        BIGINT      NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  destination_id BIGINT      NOT NULL REFERENCES destinations(id) ON DELETE CASCADE,
+  request_id     BIGINT      REFERENCES recommendation_requests(id) ON DELETE SET NULL,
+  saved_at       TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (user_id, destination_id)
+);
 
 -- ---------------------------------------------------------------------
 -- REVIEWS & RATINGS
 -- ---------------------------------------------------------------------
-DROP TABLE IF EXISTS reviews;
 CREATE TABLE reviews (
-  id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  user_id         BIGINT UNSIGNED NOT NULL,
-  destination_id  BIGINT UNSIGNED NOT NULL,
-  rating          DECIMAL(2,1) NOT NULL CHECK (rating >= 1 AND rating <= 5),
-  title           VARCHAR(150) DEFAULT NULL,
-  body            TEXT,
-  created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-  FOREIGN KEY (destination_id) REFERENCES destinations(id) ON DELETE CASCADE,
-  UNIQUE KEY uq_review (user_id, destination_id),
-  INDEX idx_reviews_dest (destination_id)
-) ENGINE=InnoDB;
+  id             BIGSERIAL PRIMARY KEY,
+  user_id        BIGINT       NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  destination_id BIGINT       NOT NULL REFERENCES destinations(id) ON DELETE CASCADE,
+  rating         DECIMAL(2,1) NOT NULL CHECK (rating >= 1 AND rating <= 5),
+  title          VARCHAR(150) DEFAULT NULL,
+  body           TEXT,
+  created_at     TIMESTAMPTZ  NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (user_id, destination_id)
+);
+
+CREATE INDEX idx_reviews_dest ON reviews (destination_id);
 
 -- ---------------------------------------------------------------------
 -- SEARCH HISTORY
 -- ---------------------------------------------------------------------
-DROP TABLE IF EXISTS search_history;
 CREATE TABLE search_history (
-  id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  user_id     BIGINT UNSIGNED NOT NULL,
-  query       VARCHAR(255) NOT NULL,
-  filters     JSON DEFAULT NULL,
-  created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-  INDEX idx_search_user (user_id)
-) ENGINE=InnoDB;
+  id         BIGSERIAL PRIMARY KEY,
+  user_id    BIGINT       NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  query      VARCHAR(255) NOT NULL,
+  filters    JSONB        DEFAULT NULL,
+  created_at TIMESTAMPTZ  NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_search_user ON search_history (user_id);
 
 -- ---------------------------------------------------------------------
--- CREDIT TRANSACTIONS (audit trail for credit changes)
+-- CREDIT TRANSACTIONS
 -- ---------------------------------------------------------------------
-DROP TABLE IF EXISTS credit_transactions;
 CREATE TABLE credit_transactions (
-  id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  user_id     BIGINT UNSIGNED NOT NULL,
-  amount      INT NOT NULL,                 -- positive = credit, negative = debit
-  reason      VARCHAR(255) NOT NULL,        -- e.g. 'signup_bonus', 'recommendation_generated'
-  balance_after INT UNSIGNED NOT NULL,
-  created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-  INDEX idx_credit_user (user_id)
-) ENGINE=InnoDB;
+  id            BIGSERIAL PRIMARY KEY,
+  user_id       BIGINT       NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  amount        INTEGER      NOT NULL,
+  reason        VARCHAR(255) NOT NULL,
+  balance_after INTEGER      NOT NULL CHECK (balance_after >= 0),
+  created_at    TIMESTAMPTZ  NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 
-SET FOREIGN_KEY_CHECKS = 1;
+CREATE INDEX idx_credit_user ON credit_transactions (user_id);
 
 -- ---------------------------------------------------------------------
--- KIDS CATALOG ITEMS — non-travel recommendation content (movies, books,
--- courses, games, music, restaurants, fashion, electronics) that is
--- specifically for children. Kept in its own table, completely separate
--- from `catalog_items`, so the main (adult) recommendation engine never
--- sees or serves this content. It is only ever read by the Kids page/API.
+-- KIDS CATALOG ITEMS
 -- ---------------------------------------------------------------------
-DROP TABLE IF EXISTS kids_catalog_items;
 CREATE TABLE kids_catalog_items (
-  id                BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  category          ENUM('movies','books','career','electronics','courses','fashion','restaurants','games','music') NOT NULL,
-  title             VARCHAR(200) NOT NULL,
-  description       TEXT NOT NULL,
-  tags              VARCHAR(300) DEFAULT NULL,
-  price_label       VARCHAR(100) DEFAULT NULL,
-  price_usd         DECIMAL(10,2) DEFAULT NULL,
-  budget_tier       ENUM('low','medium','high','luxury') DEFAULT 'medium',
-  pros              JSON DEFAULT NULL,
-  cons              JSON DEFAULT NULL,
-  emoji             VARCHAR(32) DEFAULT NULL,
-  popularity_score  DECIMAL(4,2) DEFAULT 0,
-  avg_rating        DECIMAL(3,2) DEFAULT 0,
-  rating_count      INT UNSIGNED DEFAULT 0,
-  region            VARCHAR(100) DEFAULT NULL,
-  age_group         VARCHAR(50)  DEFAULT NULL,        -- e.g. '3+', '6+', 'All'
-  created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  INDEX idx_kids_catalog_category (category),
-  FULLTEXT INDEX ft_kids_catalog_search (title, description, tags)
-) ENGINE=InnoDB;
+  id               BIGSERIAL PRIMARY KEY,
+  category         VARCHAR(32)   NOT NULL
+    CHECK (category IN ('movies', 'books', 'career', 'electronics', 'courses', 'fashion', 'restaurants', 'games', 'music')),
+  title            VARCHAR(200)  NOT NULL,
+  description      TEXT          NOT NULL,
+  tags             VARCHAR(300)  DEFAULT NULL,
+  price_label      VARCHAR(100)  DEFAULT NULL,
+  price_usd        DECIMAL(10,2) DEFAULT NULL,
+  budget_tier      VARCHAR(16)   DEFAULT 'medium'
+    CHECK (budget_tier IN ('low', 'medium', 'high', 'luxury')),
+  pros             JSONB         DEFAULT NULL,
+  cons             JSONB         DEFAULT NULL,
+  emoji            VARCHAR(32)   DEFAULT NULL,
+  popularity_score DECIMAL(4,2)  DEFAULT 0,
+  avg_rating       DECIMAL(3,2)  DEFAULT 0,
+  rating_count     INTEGER       DEFAULT 0 CHECK (rating_count >= 0),
+  region           VARCHAR(100)  DEFAULT NULL,
+  age_group        VARCHAR(50)   DEFAULT NULL,
+  created_at       TIMESTAMPTZ   NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_kids_catalog_category ON kids_catalog_items (category);
 
 -- ---------------------------------------------------------------------
--- CATALOG ITEMS — generic recommendation catalog for the non-travel
--- categories (Movies, Books, Career, Electronics, Courses, Fashion,
--- Restaurants, Games, Music). Travel keeps its own richer `destinations`
--- table above since it needs location/age/season-specific fields; these
--- categories share one flexible schema instead of nine near-identical ones.
+-- CATALOG ITEMS
 -- ---------------------------------------------------------------------
-DROP TABLE IF EXISTS catalog_items;
 CREATE TABLE catalog_items (
-  id                BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  category          ENUM('movies','books','career','electronics','courses','fashion','restaurants','games','music') NOT NULL,
-  title             VARCHAR(200) NOT NULL,
-  description       TEXT NOT NULL,
-  tags              VARCHAR(300) DEFAULT NULL,      -- comma-separated, used for interest matching
-  price_label       VARCHAR(100) DEFAULT NULL,       -- human-readable, e.g. "$16 on Amazon"
-  price_usd         DECIMAL(10,2) DEFAULT NULL,       -- numeric, used for budget matching
-  budget_tier       ENUM('low','medium','high','luxury') DEFAULT 'medium',
-  pros              JSON DEFAULT NULL,                -- array of strings
-  cons              JSON DEFAULT NULL,                -- array of strings
-  emoji             VARCHAR(32) DEFAULT NULL,
-  popularity_score  DECIMAL(4,2) DEFAULT 0,
-  avg_rating        DECIMAL(3,2) DEFAULT 0,
-  rating_count      INT UNSIGNED DEFAULT 0,
-  region            VARCHAR(100) DEFAULT NULL,        -- e.g. 'Global', 'India' (present on some migrated rows)
-  audience          VARCHAR(100) DEFAULT NULL,        -- e.g. 'kids', 'adults', 'all' (present on some migrated rows)
-  age_group         VARCHAR(50)  DEFAULT NULL,        -- e.g. '0-12', '13-17', '18+' (present on some migrated rows)
-  created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  INDEX idx_catalog_category (category),
-  FULLTEXT INDEX ft_catalog_search (title, description, tags)
-) ENGINE=InnoDB;
+  id               BIGSERIAL PRIMARY KEY,
+  category         VARCHAR(32)   NOT NULL
+    CHECK (category IN ('movies', 'books', 'career', 'electronics', 'courses', 'fashion', 'restaurants', 'games', 'music')),
+  title            VARCHAR(200)  NOT NULL,
+  description      TEXT          NOT NULL,
+  tags             VARCHAR(300)  DEFAULT NULL,
+  price_label      VARCHAR(100)  DEFAULT NULL,
+  price_usd        DECIMAL(10,2) DEFAULT NULL,
+  budget_tier      VARCHAR(16)   DEFAULT 'medium'
+    CHECK (budget_tier IN ('low', 'medium', 'high', 'luxury')),
+  pros             JSONB         DEFAULT NULL,
+  cons             JSONB         DEFAULT NULL,
+  emoji            VARCHAR(32)   DEFAULT NULL,
+  popularity_score DECIMAL(4,2)  DEFAULT 0,
+  avg_rating       DECIMAL(3,2)  DEFAULT 0,
+  rating_count     INTEGER       DEFAULT 0 CHECK (rating_count >= 0),
+  region           VARCHAR(100)  DEFAULT NULL,
+  audience         VARCHAR(100)  DEFAULT NULL,
+  age_group        VARCHAR(50)   DEFAULT NULL,
+  created_at       TIMESTAMPTZ   NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_catalog_category ON catalog_items (category);
+
+-- ---------------------------------------------------------------------
+-- updated_at trigger for users
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = CURRENT_TIMESTAMP;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER update_users_updated_at
+  BEFORE UPDATE ON users
+  FOR EACH ROW
+  EXECUTE PROCEDURE update_updated_at_column();

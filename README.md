@@ -5,7 +5,7 @@ A full-stack AI-assisted recommendation platform. Users get personalized picks a
 and music — plus a dedicated **Kids mode** with age-appropriate content served from a completely
 separate catalog.
 
-Built as a production-style reference implementation: real JWT authentication, a MySQL-backed data
+Built as a production-style reference implementation: real JWT authentication, a PostgreSQL-backed data
 layer, Stripe subscription billing (with a safe demo mode when no Stripe keys are configured), and a
 credit-based usage system that gates free-tier recommendations.
 
@@ -68,14 +68,14 @@ credit-based usage system that gates free-tier recommendations.
 **Backend**
 
 - Node.js + Express (MVC structure: routes → controllers → models)
-- MySQL via `mysql2`
+- PostgreSQL via `pg` (node-postgres)
 - JWT authentication (`jsonwebtoken`) with `bcryptjs` password hashing
 - Stripe SDK for subscription billing
 - `helmet`, `cors`, `morgan`, `express-validator` for security, logging, and input validation
 
 **Database**
 
-- MySQL 8.0+
+- PostgreSQL 14+ (Neon, Supabase, or local)
 
 ## Project structure
 
@@ -85,319 +85,265 @@ AI-Recommendation-Engine/
 │   ├── src/
 │   │   ├── app/                 Application shell, pages, and components
 │   │   ├── lib/                 API client
-│   │   └── styles/               Tailwind + theme tokens
+│   │   └── styles/              Tailwind + theme tokens
 │   └── package.json
 │
-├── backend/                      Express API
+├── backend/                     Express API
 │   ├── src/
-│   │   ├── config/               DB connection pool
-│   │   ├── controllers/          Request handlers (one per domain)
-│   │   ├── middleware/           Auth guard, error handler
-│   │   ├── models/                Data-access layer
-│   │   ├── routes/                Express routers, mounted under /api
-│   │   ├── services/              Business logic (e.g. recommendation engine)
-│   │   ├── utils/                 Seed script, health check, JWT helpers
+│   │   ├── config/              DB connection pool (PostgreSQL)
+│   │   ├── controllers/         Request handlers (one per domain)
+│   │   ├── middleware/          Auth guard, error handler
+│   │   ├── models/              Data-access layer
+│   │   ├── routes/              Express routers, mounted under /api
+│   │   ├── services/            Business logic (e.g. recommendation engine)
+│   │   ├── utils/               Seed script, JWT helpers
 │   │   └── server.js / app.js
 │   └── package.json
 │
-├── database/
-│   ├── schema.sql                 Full MySQL schema (14 tables)
-│   ├── sample_data.sql            271 destinations + catalog items across
-│   │                              9 adult categories + a separate kids
-│   │                              catalog + kids activities + demo user
-│   └── migrations/                Incremental schema migrations for
-│                                  upgrading an existing database in place
+├── api/
+│   └── index.js                 Vercel serverless function entry point
 │
-├── package.json                   Convenience scripts for the whole repo
-├── docker-compose.yml              Orchestrates mysql + backend + frontend containers
-├── AWS_DEPLOYMENT.md               Step-by-step AWS deployment guide (EC2+RDS or Docker)
-└── README.md
+├── database/
+│   ├── schema.sql               Full PostgreSQL schema (14 tables)
+│   ├── sample_data.sql          Demo seed data
+│   └── migrate.js               Migration runner script
+│
+├── vercel.json                  Vercel deployment configuration
+└── package.json                 Root: install + build scripts
 ```
-
-Each of `backend/` and `frontend/` also has its own `Dockerfile` and `.dockerignore`, used by
-`docker-compose.yml` and referenced in `AWS_DEPLOYMENT.md`.
 
 ## Prerequisites
 
 - **Node.js** 18 or later
-- **MySQL** 8.0 or later, running locally or accessible over the network
-- A terminal — examples below are shown for both bash and Windows PowerShell where they differ
+- **PostgreSQL** 14 or later (local, or a hosted Neon/Supabase instance)
 
 ## Getting started
 
 ### 1. Clone and configure
 
 ```bash
-git clone <your-fork-or-zip-source> AI-Recommendation-Engine
+git clone https://github.com/your-org/AI-Recommendation-Engine.git
 cd AI-Recommendation-Engine
+cp backend/.env.example backend/.env
+# Edit backend/.env — at minimum set DATABASE_URL
 ```
 
 ### 2. Set up the database
 
-Create the schema (this creates the `smart_recommend_ai` database and all tables):
+Create a PostgreSQL database, then apply the schema and (optionally) seed data:
 
 ```bash
-# bash / macOS / Linux
-mysql -u root -p < database/schema.sql
+# Apply schema
+DATABASE_URL="postgresql://user:password@localhost:5432/smart_recommend_ai" node database/migrate.js
 
-# Windows PowerShell
-Get-Content database/schema.sql | mysql -u root -p
+# Apply schema + seed data
+DATABASE_URL="postgresql://user:password@localhost:5432/smart_recommend_ai" node database/migrate.js --seed
 ```
 
-Load the sample dataset (destinations, catalog items, kids catalog, and the demo account).
-**Important:** the dataset contains emoji, so the client connection must use `utf8mb4` or the import
-will fail with a "Data too long for column" error.
+Or using Docker (starts a local PostgreSQL + seeds automatically):
 
 ```bash
-# bash / macOS / Linux
-mysql -u root -p --default-character-set=utf8mb4 smart_recommend_ai < database/sample_data.sql
-
-# Windows PowerShell
-Get-Content database/sample_data.sql | mysql -u root -p --default-character-set=utf8mb4 smart_recommend_ai
+cp .env.example .env   # adjust passwords if needed
+docker compose up -d
 ```
-
-Create a dedicated application user rather than running the app as `root` in production:
-
-```sql
-CREATE USER 'app_user'@'localhost' IDENTIFIED BY 'your_password_here';
-GRANT ALL PRIVILEGES ON smart_recommend_ai.* TO 'app_user'@'localhost';
-FLUSH PRIVILEGES;
-```
-
-> If you're upgrading an **existing** database created by an earlier version of this project rather
-> than importing the schema fresh, run the scripts in `database/migrations/` in order instead of
-> re-running `schema.sql` (which would drop and recreate tables and lose your data).
 
 ### 3. Start the backend
 
 ```bash
-cd backend
-cp .env.example .env      # Windows: copy .env.example .env
-```
-
-Edit `.env` with your database credentials and JWT secrets (see
-[Environment variables](#environment-variables) below), then:
-
-```bash
-npm install
-npm run seed     # sets a verified password hash for the demo account
-npm run dev       # starts the API on http://localhost:5000
+npm install --prefix backend
+npm run dev:backend
+# → http://localhost:5000/api/health
 ```
 
 ### 4. Start the frontend
 
-In a new terminal:
-
 ```bash
-cd frontend
-cp .env.example .env      # Windows: copy .env.example .env
-npm install
-npm run dev       # starts the app on http://localhost:5173
+npm install --prefix frontend
+npm run dev:frontend
+# → http://localhost:5173
 ```
 
 ### 5. Log in
 
-Open `http://localhost:5173` and either register a new account or use the seeded demo account:
+Use the demo account (requires sample data seeded):
 
-```
-Email:    demo@smartrecommend.ai
-Password: Passw0rd!
-```
+| Field    | Value                      |
+|----------|----------------------------|
+| Email    | `demo@smartrecommend.ai`   |
+| Password | `Passw0rd!`                |
 
 ## Environment variables
 
-### `backend/.env`
+### Backend (`backend/.env`)
 
-| Variable                 | Description                                           | Example                 |
-| ------------------------ | ----------------------------------------------------- | ----------------------- |
-| `PORT`                   | Port the API listens on                               | `5000`                  |
-| `NODE_ENV`               | Runtime environment                                   | `development`           |
-| `DB_HOST`                | MySQL host                                            | `localhost`             |
-| `DB_PORT`                | MySQL port                                            | `3306`                  |
-| `DB_USER`                | MySQL user                                            | `app_user`              |
-| `DB_PASSWORD`            | MySQL password                                        | —                       |
-| `DB_NAME`                | Database name                                         | `smart_recommend_ai`    |
-| `JWT_ACCESS_SECRET`      | Secret for signing access tokens                      | long random string      |
-| `JWT_REFRESH_SECRET`     | Secret for signing refresh tokens                     | long random string      |
-| `JWT_ACCESS_EXPIRES_IN`  | Access token lifetime                                 | `15m`                   |
-| `JWT_REFRESH_EXPIRES_IN` | Refresh token lifetime                                | `7d`                    |
-| `SIGNUP_BONUS_CREDITS`   | Free credits granted on registration                  | `5`                     |
-| `CORS_ORIGIN`            | Allowed frontend origin                               | `http://localhost:5173` |
-| `FRONTEND_URL`           | Used to build absolute links (e.g. Stripe redirect)   | `http://localhost:5173` |
-| `STRIPE_SECRET_KEY`      | Stripe secret key (test mode) — optional              | —                       |
-| `STRIPE_PRICE_ID`        | Stripe recurring Price ID for the Pro plan — optional | —                       |
-| `STRIPE_WEBHOOK_SECRET`  | Stripe webhook signing secret — optional              | —                       |
+| Variable | Description | Default |
+|---|---|---|
+| `DATABASE_URL` | PostgreSQL connection string (required) | — |
+| `PORT` | API server port | `5000` |
+| `NODE_ENV` | Environment | `development` |
+| `JWT_ACCESS_SECRET` | Secret for signing access tokens | — |
+| `JWT_REFRESH_SECRET` | Secret for signing refresh tokens | — |
+| `JWT_ACCESS_EXPIRES_IN` | Access token lifetime | `15m` |
+| `JWT_REFRESH_EXPIRES_IN` | Refresh token lifetime | `7d` |
+| `SIGNUP_BONUS_CREDITS` | Credits given on registration | `5` |
+| `CORS_ORIGIN` | Allowed CORS origin | `http://localhost:5173` |
+| `FRONTEND_URL` | Used for Stripe redirect URLs | `http://localhost:5173` |
+| `STRIPE_SECRET_KEY` | Stripe secret key (optional) | — |
+| `STRIPE_PRICE_ID` | Stripe Price ID for Pro plan (optional) | — |
+| `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret (optional) | — |
 
-Leave the three `STRIPE_*` variables blank to use the built-in simulated checkout flow — no Stripe
-account is required to run or demo the app.
+### Frontend (`frontend/.env`)
 
-### `frontend/.env`
-
-| Variable       | Description                 | Example                     |
-| -------------- | --------------------------- | --------------------------- |
-| `VITE_API_URL` | Base URL of the backend API | `http://localhost:5000/api` |
+| Variable | Description | Default |
+|---|---|---|
+| `VITE_API_URL` | Backend API base URL | `http://localhost:5000/api` |
 
 ## Available scripts
 
-From the repository root (`package.json`):
+Run from the **project root**:
 
-| Script                   | Description                                              |
-| ------------------------ | -------------------------------------------------------- |
-| `npm run install:all`    | Installs dependencies in both `backend/` and `frontend/` |
-| `npm run dev:backend`    | Starts the backend in watch mode                         |
-| `npm run dev:frontend`   | Starts the frontend dev server                           |
-| `npm run build:frontend` | Type-checks and builds the frontend for production       |
-| `npm run seed:backend`   | Runs the backend seed script                             |
-
-From `backend/package.json`:
-
-| Script                | Description                                            |
-| --------------------- | ------------------------------------------------------ |
-| `npm run dev`         | Starts the API with `nodemon` (auto-restart on change) |
-| `npm start`           | Starts the API with plain `node`                       |
-| `npm run seed`        | Sets a verified bcrypt hash for the demo account       |
-| `npm run test:health` | Runs a basic health check against the running API      |
-
-From `frontend/package.json`:
-
-| Script            | Description                                      |
-| ----------------- | ------------------------------------------------ |
-| `npm run dev`     | Starts the Vite dev server                       |
-| `npm run build`   | Type-checks (`tsc -b`) and builds for production |
-| `npm run preview` | Serves the production build locally              |
+| Script | Description |
+|---|---|
+| `npm run install:all` | Install backend + frontend dependencies |
+| `npm run build` | Build the frontend for production |
+| `npm run dev:backend` | Start the backend in development mode |
+| `npm run dev:frontend` | Start the frontend dev server |
+| `npm run migrate` | Apply database schema |
+| `npm run migrate:seed` | Apply schema + seed data |
 
 ## API reference
 
-All routes are mounted under `/api`. Routes marked 🔒 require a valid `Authorization: Bearer <token>`
-header.
+All routes are prefixed with `/api`.
 
-| Resource            | Method & path                                     | Description                                            |
-| ------------------- | ------------------------------------------------- | ------------------------------------------------------ |
-| **Auth**            | `POST /auth/register`                             | Create an account                                      |
-|                     | `POST /auth/login`                                | Log in, receive access + refresh tokens                |
-|                     | `POST /auth/refresh`                              | Exchange a refresh token for a new access token        |
-|                     | `POST /auth/logout`                               | Invalidate the current session                         |
-|                     | 🔒 `GET /auth/me`                                 | Get the current user                                   |
-| **Users**           | 🔒 `GET /users/profile`                           | Get profile                                            |
-|                     | 🔒 `PUT /users/profile`                           | Update profile                                         |
-|                     | 🔒 `DELETE /users/account`                        | Permanently delete the account                         |
-| **Destinations**    | `GET /destinations`                               | List destinations                                      |
-|                     | `GET /destinations/search`                        | Search destinations                                    |
-|                     | `GET /destinations/categories`                    | List destination categories                            |
-|                     | `GET /destinations/:id`                           | Get one destination                                    |
-| **Recommendations** | 🔒 `POST /recommendations/generate`               | Generate recommendations                               |
-|                     | 🔒 `GET /recommendations/history`                 | List past recommendation requests                      |
-|                     | 🔒 `DELETE /recommendations/history/:requestId`   | Delete a history entry                                 |
-|                     | 🔒 `POST /recommendations/save`                   | Save a recommendation                                  |
-|                     | 🔒 `GET /recommendations/saved`                   | List saved recommendations                             |
-|                     | 🔒 `DELETE /recommendations/saved/:destinationId` | Unsave a recommendation                                |
-| **Catalog**         | `GET /catalog/search`                             | Search the general catalog                             |
-|                     | `GET /catalog/:category`                          | Browse a category                                      |
-|                     | 🔒 `POST /catalog/:category/generate`             | Generate category recommendations                      |
-| **Kids**            | `GET /kids`                                       | List kids activities                                   |
-|                     | `GET /kids/recommend`                             | Recommend for a child                                  |
-|                     | `GET /kids/family`                                | Recommend for a family                                 |
-|                     | `GET /kids/catalog`                               | Browse the kids catalog                                |
-|                     | `GET /kids/catalog/categories`                    | List kids catalog categories                           |
-| **Credits**         | 🔒 `GET /credits`                                 | Get current credit balance                             |
-|                     | 🔒 `PUT /credits`                                 | Adjust credits                                         |
-|                     | 🔒 `GET /credits/history`                         | List credit transactions                               |
-| **Wishlist**        | 🔒 `GET /wishlist`                                | List wishlist items                                    |
-|                     | 🔒 `POST /wishlist`                               | Add to wishlist                                        |
-|                     | 🔒 `DELETE /wishlist/:destinationId`              | Remove from wishlist                                   |
-| **Reviews**         | `GET /reviews/:destinationId`                     | List reviews for a destination                         |
-|                     | 🔒 `POST /reviews`                                | Create or update a review                              |
-|                     | 🔒 `DELETE /reviews/:destinationId`               | Delete a review                                        |
-| **History**         | 🔒 `POST /history/travel`                         | Log a travel history entry                             |
-|                     | 🔒 `GET /history/travel`                          | List travel history                                    |
-|                     | 🔒 `GET /history/search`                          | List search history                                    |
-| **Payments**        | 🔒 `POST /payments/create-checkout-session`       | Start a Stripe Checkout session                        |
-|                     | 🔒 `POST /payments/confirm`                       | Confirm a completed checkout                           |
-|                     | `GET /payments/status`                            | Get current billing status                             |
-|                     | 🔒 `POST /payments/demo-upgrade`                  | Upgrade to Pro without Stripe (demo mode)              |
-|                     | 🔒 `POST /payments/cancel`                        | Cancel the Pro subscription                            |
-|                     | 🔒 `POST /payments/resume`                        | Resume a cancelled subscription                        |
-|                     | 🔒 `GET /payments/invoice`                        | Download the latest invoice as a PDF                   |
-|                     | `POST /payments/webhook`                          | Stripe webhook endpoint (raw body, signature-verified) |
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/health` | — | Health check |
+| POST | `/auth/register` | — | Register a new user |
+| POST | `/auth/login` | — | Log in |
+| POST | `/auth/logout` | — | Log out |
+| POST | `/auth/refresh` | — | Refresh access token |
+| GET | `/auth/me` | ✓ | Get current user |
+| GET | `/users/profile` | ✓ | Get user profile |
+| PUT | `/users/profile` | ✓ | Update profile |
+| DELETE | `/users/account` | ✓ | Delete account |
+| POST | `/recommendations/generate` | ✓ | Generate travel recommendations |
+| GET | `/recommendations/history` | ✓ | Recommendation history |
+| DELETE | `/recommendations/history/:requestId` | ✓ | Delete history item |
+| POST | `/recommendations/save` | ✓ | Save a recommendation |
+| GET | `/recommendations/saved` | ✓ | List saved recommendations |
+| DELETE | `/recommendations/saved/:destinationId` | ✓ | Remove saved |
+| GET | `/destinations` | — | List destinations |
+| GET | `/destinations/:id` | — | Get destination |
+| GET | `/destinations/search` | — | Search destinations |
+| GET | `/destinations/categories` | — | List categories |
+| GET | `/kids` | — | List kids activities |
+| GET | `/kids/recommend` | — | Activities for age |
+| GET | `/kids/catalog` | — | Kids catalog items |
+| GET | `/kids/catalog/categories` | — | Kids catalog categories |
+| GET | `/credits` | ✓ | Get credit balance |
+| PUT | `/credits` | ✓ | Adjust credits |
+| GET | `/credits/history` | ✓ | Credit transaction history |
+| GET | `/wishlist` | ✓ | List wishlist |
+| POST | `/wishlist` | ✓ | Add to wishlist |
+| DELETE | `/wishlist/:destinationId` | ✓ | Remove from wishlist |
+| GET | `/reviews/:destinationId` | — | List reviews |
+| POST | `/reviews` | ✓ | Submit/update review |
+| DELETE | `/reviews/:destinationId` | ✓ | Delete review |
+| GET | `/history/travel` | ✓ | Travel history |
+| POST | `/history/travel` | ✓ | Add travel history |
+| GET | `/history/search` | ✓ | Search history |
+| GET | `/payments/status` | — | Payment config status |
+| POST | `/payments/create-checkout-session` | ✓ | Start Stripe checkout |
+| POST | `/payments/confirm` | ✓ | Confirm checkout session |
+| POST | `/payments/demo-upgrade` | ✓ | Demo upgrade (no real payment) |
+| POST | `/payments/cancel` | ✓ | Cancel subscription |
+| POST | `/payments/resume` | ✓ | Resume subscription |
+| GET | `/payments/invoice` | ✓ | Get invoice |
+| POST | `/payments/webhook` | — | Stripe webhook |
+| GET | `/catalog/:category` | ✓ | Browse catalog category |
+| POST | `/catalog/:category/generate` | ✓ | Generate catalog recommendations |
+| GET | `/catalog/search` | ✓ | Search catalog |
 
 ## Database schema
 
-Fourteen tables, defined in `database/schema.sql`:
+14 tables in PostgreSQL:
 
-`users`, `sessions`, `destinations`, `kids_activities`, `travel_history`,
-`recommendation_requests`, `recommendation_results`, `wishlist`, `saved_recommendations`,
-`reviews`, `search_history`, `credit_transactions`, `kids_catalog_items`, `catalog_items`
-
-Two catalogs are intentionally kept separate: `catalog_items` (adult recommendations across 9
-categories) and `kids_catalog_items` (age-appropriate content for the Kids page), so the two audiences
-never share query paths or results.
-
-`database/sample_data.sql` seeds:
-
-- 271 destinations (India + international)
-- ~2,500 catalog items across 9 adult categories
-- A separate kids catalog and kids activity set
-- One demo user account
+- `users` — accounts, credits, plan status
+- `sessions` — refresh token store
+- `destinations` — 271+ travel destinations
+- `kids_activities` — age-gated activity recommendations
+- `recommendation_requests` — each generate call
+- `recommendation_results` — scored destinations per request
+- `saved_recommendations` — user-bookmarked results
+- `wishlist` — destination wishlist
+- `reviews` — user reviews and ratings
+- `travel_history` — visited destinations log
+- `search_history` — query audit log
+- `credit_transactions` — credit ledger
+- `catalog_items` — non-kids recommendation catalog
+- `kids_catalog_items` — kids-only catalog (completely isolated)
 
 ## Billing and payments
 
-Pro subscriptions are handled through Stripe Checkout when `STRIPE_SECRET_KEY` and `STRIPE_PRICE_ID`
-are configured. If they're left blank, the app automatically falls back to a **simulated checkout**:
-users see a realistic card-entry screen, but no card data is transmitted or stored and no real payment
-network is contacted — it exists purely to demonstrate the full upgrade flow end to end.
+When `STRIPE_SECRET_KEY` and `STRIPE_PRICE_ID` are set, the upgrade flow uses real Stripe Checkout.
+When they are not set, the app automatically falls back to a clearly-labelled **demo upgrade** that
+updates the database without involving any payment network.
 
-Cancelling a plan sets a visible "cancelled" state showing the date access remains active until, with
-an option to resume before that date. Invoices are generated as real PDF files on demand via
-`GET /payments/invoice`.
+The Stripe webhook (`POST /api/payments/webhook`) listens for `checkout.session.completed` and upgrades
+the user's plan in the database. To test locally, forward Stripe events with:
+
+```bash
+stripe listen --forward-to http://localhost:5000/api/payments/webhook
+```
 
 ## Deployment
 
-For running this in production on AWS, see **[`AWS_DEPLOYMENT.md`](./AWS_DEPLOYMENT.md)**, which
-covers two paths in detail:
+### Vercel (recommended)
 
-- **EC2 + RDS** — a small EC2 instance running the backend under PM2 and Nginx serving the built
-  frontend, with MySQL on a managed RDS instance.
-- **Docker on EC2** — using the `Dockerfile`s and `docker-compose.yml` included in this repo, which
-  bring up MySQL, the backend, and the frontend as three containers with one command:
+1. Push the project to GitHub.
+2. Import the repo in Vercel.
+3. Set environment variables in the Vercel dashboard:
+   - `DATABASE_URL` — your Neon PostgreSQL connection string
+   - `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`
+   - `STRIPE_SECRET_KEY`, `STRIPE_PRICE_ID`, `STRIPE_WEBHOOK_SECRET` (optional)
+   - `FRONTEND_URL` — your Vercel deployment URL
+   - `CORS_ORIGIN` — your Vercel deployment URL
+4. Vercel will run `npm run install:all` and `npm run build` automatically.
+5. Apply the schema to Neon once:
+   ```bash
+   DATABASE_URL="your-neon-url" node database/migrate.js --seed
+   ```
 
-  ```bash
-  cp .env.example .env    # fill in real secrets first
-  docker compose up -d --build
-  ```
+### Docker Compose (local / self-hosted)
 
-Both paths include HTTPS setup with Certbot and notes on scaling further (RDS, ECR/ECS, S3+CloudFront,
-Secrets Manager).
+```bash
+cp .env.example .env   # adjust passwords
+docker compose up -d --build
+```
+
+This starts PostgreSQL (with schema + seed data auto-loaded), the backend, and the frontend (via Nginx).
 
 ## Troubleshooting
 
-**`ERROR 1406: Data too long for column 'emoji'` when importing `sample_data.sql`**
-Your MySQL client is connecting with a non-UTF-8 charset. Re-run the import with
-`--default-character-set=utf8mb4` as shown in [Set up the database](#2-set-up-the-database).
+**`DATABASE_URL is required` error**
+Make sure `backend/.env` has `DATABASE_URL` set to a valid PostgreSQL connection string.
 
-**`ERROR 1045: Access denied` when connecting to MySQL**
-Double-check the username/password in `backend/.env` match a user that actually exists — run
-`SELECT user, host FROM mysql.user;` as root to confirm — and that you're not mixing up a `-p` flag
-with no space before the password (e.g. `-pMyPassword`, not `-p MyPassword`).
+**`Error: role "app_user" does not exist`**
+The database user doesn't exist. Either create it or update `DATABASE_URL` to use an existing user.
 
-**Login fails for `demo@smartrecommend.ai`**
-Run `npm run seed` from `backend/` — this sets a verified bcrypt hash for the demo account after
-`sample_data.sql` has been imported.
+**Build fails with TypeScript errors**
+Run `npm run build --prefix frontend` to see the exact errors. The frontend requires Node 18+.
 
-**`'<' operator is reserved for future use` in PowerShell**
-PowerShell doesn't support bash-style `<` redirection. Use `Get-Content file.sql | mysql ...` instead,
-as shown throughout this README.
+**Credits not deducting**
+Ensure `DATABASE_URL` points to a seeded database. Credits are stored in the `users` table.
 
 ## Security notes
 
-- Passwords are hashed with `bcryptjs`; plaintext passwords are never stored.
-- Access tokens are short-lived; refresh tokens are used to obtain new ones without re-authenticating.
-- `helmet` sets sensible security-related HTTP headers by default.
-- Do not commit `.env` files. Use strong, unique values for `JWT_ACCESS_SECRET` and
-  `JWT_REFRESH_SECRET` in any deployed environment.
-- The Stripe webhook route verifies signatures against `STRIPE_WEBHOOK_SECRET` and reads the raw
-  request body, per Stripe's requirements — do not add body-parsing middleware ahead of it.
+- Change all secret values before deploying to production.
+- Never commit `.env` files (they are in `.gitignore`).
+- The demo upgrade endpoint is intentionally unprotected by Stripe signature verification — it is clearly
+  labelled as demo-only and should be disabled or removed if you configure real Stripe keys.
 
 ## License
 
-This project is provided as-is for educational and demonstration purposes. Add a license of your
-choice here before distributing or deploying it publicly.
+MIT

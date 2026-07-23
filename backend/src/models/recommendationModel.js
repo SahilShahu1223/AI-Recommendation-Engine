@@ -1,21 +1,29 @@
 const { pool } = require('../config/db');
 
 async function createRequest({ userId, interests, purpose, budgetUsd, locationPreference, travelStyle, season }) {
-  const [result] = await pool.query(
+  const [, meta] = await pool.query(
     `INSERT INTO recommendation_requests
       (user_id, interests, purpose, budget_usd, location_preference, travel_style, season)
      VALUES (:userId, :interests, :purpose, :budgetUsd, :locationPreference, :travelStyle, :season)`,
     { userId, interests, purpose, budgetUsd, locationPreference, travelStyle, season }
   );
-  return result.insertId;
+  return meta.insertId;
 }
 
 async function saveResults(requestId, scoredDestinations) {
   if (!scoredDestinations.length) return;
-  const values = scoredDestinations.map((d, idx) => [requestId, d.id, d.score, d.reason, idx + 1]);
+
+  // Build a multi-row INSERT using positional $N params for PostgreSQL
+  const values = [];
+  const valueClauses = scoredDestinations.map((d, idx) => {
+    const base = idx * 5;
+    values.push(requestId, d.id, d.score, d.reason, idx + 1);
+    return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5})`;
+  });
+
   await pool.query(
-    `INSERT INTO recommendation_results (request_id, destination_id, score, reason, rank_position) VALUES ?`,
-    [values]
+    `INSERT INTO recommendation_results (request_id, destination_id, score, reason, rank_position) VALUES ${valueClauses.join(', ')}`,
+    values
   );
   await pool.query(
     'UPDATE recommendation_requests SET result_count = :count WHERE id = :requestId',

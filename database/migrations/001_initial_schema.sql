@@ -1,0 +1,2 @@
+-- Initial PostgreSQL schema migration
+-- Apply with: psql "$DATABASE_URL" -f database/schema.sql

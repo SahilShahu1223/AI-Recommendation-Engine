@@ -5,7 +5,8 @@ async function upsertReview({ userId, destinationId, rating, title, body }) {
   await pool.query(
     `INSERT INTO reviews (user_id, destination_id, rating, title, body)
      VALUES (:userId, :destinationId, :rating, :title, :body)
-     ON DUPLICATE KEY UPDATE rating = VALUES(rating), title = VALUES(title), body = VALUES(body)`,
+     ON CONFLICT (user_id, destination_id) DO UPDATE SET
+       rating = EXCLUDED.rating, title = EXCLUDED.title, body = EXCLUDED.body`,
     { userId, destinationId, rating, title, body }
   );
   await updateRatingAggregate(destinationId);

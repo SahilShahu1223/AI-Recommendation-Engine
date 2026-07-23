@@ -1,24 +1,22 @@
 version: "3.9"
 
 services:
-  mysql:
-    image: mysql:8.0
-    container_name: smart-recommend-mysql
+  postgres:
+    image: postgres:16-alpine
+    container_name: smart-recommend-postgres
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
-      MYSQL_DATABASE: ${DB_NAME:-smart_recommend_ai}
-      MYSQL_USER: ${DB_USER:-app_user}
-      MYSQL_PASSWORD: ${DB_PASSWORD:-app_password123}
-    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+      POSTGRES_DB: ${POSTGRES_DB:-smart_recommend_ai}
+      POSTGRES_USER: ${POSTGRES_USER:-app_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app_password123}
     ports:
-      - "3306:3306"
+      - "5432:5432"
     volumes:
-      - mysql_data:/var/lib/mysql
+      - postgres_data:/var/lib/postgresql/data
       - ./database/schema.sql:/docker-entrypoint-initdb.d/1_schema.sql:ro
       - ./database/sample_data.sql:/docker-entrypoint-initdb.d/2_sample_data.sql:ro
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-app_user} -d ${POSTGRES_DB:-smart_recommend_ai}"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -29,16 +27,12 @@ services:
     container_name: smart-recommend-backend
     restart: unless-stopped
     depends_on:
-      mysql:
+      postgres:
         condition: service_healthy
     environment:
       PORT: 5000
       NODE_ENV: production
-      DB_HOST: mysql
-      DB_PORT: 3306
-      DB_USER: ${DB_USER:-app_user}
-      DB_PASSWORD: ${DB_PASSWORD:-app_password123}
-      DB_NAME: ${DB_NAME:-smart_recommend_ai}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-app_user}:${POSTGRES_PASSWORD:-app_password123}@postgres:5432/${POSTGRES_DB:-smart_recommend_ai}
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
       JWT_ACCESS_EXPIRES_IN: ${JWT_ACCESS_EXPIRES_IN:-15m}
@@ -65,4 +59,4 @@ services:
       - "5173:80"
 
 volumes:
-  mysql_data:
+  postgres_data:

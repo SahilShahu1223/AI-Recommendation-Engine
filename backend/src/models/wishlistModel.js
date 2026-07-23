@@ -2,7 +2,8 @@ const { pool } = require('../config/db');
 
 async function add(userId, destinationId) {
   await pool.query(
-    `INSERT IGNORE INTO wishlist (user_id, destination_id) VALUES (:userId, :destinationId)`,
+    `INSERT INTO wishlist (user_id, destination_id) VALUES (:userId, :destinationId)
+     ON CONFLICT (user_id, destination_id) DO NOTHING`,
     { userId, destinationId }
   );
 }

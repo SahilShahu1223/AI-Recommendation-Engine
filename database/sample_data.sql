@@ -1,8 +1,7 @@
 -- =====================================================================
 -- Smart Recommend AI — Sample / Seed Data
--- Run AFTER schema.sql
+-- Run AFTER schema.sql (PostgreSQL)
 -- =====================================================================
-USE smart_recommend_ai;
 
 -- ---------------------------------------------------------------------
 -- Demo user  (password is: Passw0rd!  -> real bcrypt hash below, verified

@@ -2,7 +2,8 @@ const { pool } = require('../config/db');
 
 async function save(userId, destinationId, requestId = null) {
   await pool.query(
-    `INSERT IGNORE INTO saved_recommendations (user_id, destination_id, request_id) VALUES (:userId, :destinationId, :requestId)`,
+    `INSERT INTO saved_recommendations (user_id, destination_id, request_id) VALUES (:userId, :destinationId, :requestId)
+     ON CONFLICT (user_id, destination_id) DO NOTHING`,
     { userId, destinationId, requestId }
   );
 }
