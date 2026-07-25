@@ -1,7 +1,9 @@
 // Lightweight API client for the Smart Recommend AI backend.
-// Base URL comes from VITE_API_URL (see .env.example), defaults to localhost:5000.
+// Base URL is set via VITE_API_URL:
+//   - Development:  frontend/.env               → http://localhost:5000/api
+//   - Production:   frontend/.env.production    → https://ai-recommendation-engine-2.onrender.com/api
 
-const API_BASE = (import.meta as any).env?.VITE_API_URL || "http://localhost:5000/api";
+const API_BASE = (import.meta as any).env?.VITE_API_URL || "https://ai-recommendation-engine-2.onrender.com/api";
 
 function getAccessToken() {
     return localStorage.getItem("sra_access_token");
